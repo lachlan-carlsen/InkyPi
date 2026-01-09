@@ -1,0 +1,177 @@
+<div class="form-group">
+    <label for="stationId" class="form-label">NDBC Buoy Station:</label>
+    <select id="stationId" name="stationId" class="form-input">
+        <option value="51205">51205 - Kailua-Kona, HI</option>
+        <option value="51201">51201 - Waimea Bay, HI</option>
+        <option value="51202">51202 - Mokapu Point, HI</option>
+        <option value="51203">51203 - Lanai, HI</option>
+        <option value="51204">51204 - Kaneohe Bay, HI</option>
+        <option value="51207">51207 - Pauwela, Maui, HI</option>
+        <option value="51208">51208 - Hilo, HI</option>
+        <option value="51211">51211 - Pearl Harbor, HI</option>
+        <option value="46221">46221 - Santa Monica Bay, CA</option>
+        <option value="46253">46253 - San Pedro, CA</option>
+        <option value="46025">46025 - Santa Monica Basin, CA</option>
+        <option value="46222">46222 - San Pedro Channel, CA</option>
+        <option value="46268">46268 - Point Loma South, CA</option>
+        <option value="46232">46232 - Point Loma, CA</option>
+        <option value="41114">41114 - Fort Pierce, FL</option>
+        <option value="41113">41113 - Cape Canaveral, FL</option>
+        <option value="44025">44025 - Long Island, NY</option>
+        <option value="44009">44009 - Delaware Bay, DE</option>
+        <option value="44065">44065 - New York Harbor, NY</option>
+    </select>
+    <div class="form-hint">
+        <a href="https://www.ndbc.noaa.gov/obs.shtml" target="_blank" rel="noopener">Find more buoy stations →</a>
+    </div>
+</div>
+
+<div class="form-group">
+    <label class="form-label">Custom Station ID (optional):</label>
+    <input type="text" id="customStationId" name="customStationId" class="form-input" placeholder="e.g., 46042" />
+    <div class="form-hint">Enter a station ID not in the list above</div>
+</div>
+
+<div class="form-group">
+    <label for="units" class="form-label">Units:</label>
+    <select id="units" name="units" class="form-input">
+        <option value="imperial">Imperial (ft, °F)</option>
+        <option value="metric">Metric (m, °C)</option>
+    </select>
+</div>
+
+<div class="form-group">
+    <label class="form-label">Title:</label>
+    <div class="form-group">
+        <input type="radio" id="title-auto" name="titleSelection" value="auto" checked>
+        <label for="title-auto">Auto (Station Name)</label>
+
+        <input type="radio" id="title-custom" name="titleSelection" value="custom">
+        <label for="title-custom">Custom</label>
+        <input type="text" id="customTitle" name="customTitle" class="form-input" placeholder="My Surf Spot" />
+    </div>
+</div>
+
+<div class="form-group">
+    <label class="form-label">Display Options:</label>
+
+    <div class="form-group">
+        <input type="checkbox" id="displayRefreshTime" name="displayRefreshTime" onclick="this.value=this.checked ? 'true' : 'false';">
+        <span>Refresh Time</span>
+    </div>
+
+    <div class="form-group">
+        <input type="checkbox" id="displayMetrics" name="displayMetrics" onclick="this.value=this.checked ? 'true' : 'false';">
+        <span>Metrics Grid</span>
+    </div>
+
+    <div class="form-group">
+        <input type="checkbox" id="displayChart" name="displayChart" onclick="this.value=this.checked ? 'true' : 'false';">
+        <span>Wave Height Chart</span>
+    </div>
+
+    <div class="form-group">
+        <input type="checkbox" id="displayMoonPhase" name="displayMoonPhase" onclick="this.value=this.checked ? 'true' : 'false';">
+        <span>Moon Phase</span>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const stationSelect = document.getElementById('stationId');
+        const customStationInput = document.getElementById('customStationId');
+        
+        // Handle custom station ID
+        customStationInput.addEventListener('change', function() {
+            if (this.value.trim()) {
+                // Add custom option if it doesn't exist
+                let customOption = stationSelect.querySelector('option[data-custom="true"]');
+                if (!customOption) {
+                    customOption = document.createElement('option');
+                    customOption.setAttribute('data-custom', 'true');
+                    stationSelect.appendChild(customOption);
+                }
+                customOption.value = this.value.trim();
+                customOption.textContent = this.value.trim() + ' - Custom';
+                stationSelect.value = this.value.trim();
+            }
+        });
+
+        if (typeof loadPluginSettings !== 'undefined' && loadPluginSettings) {
+            // Load saved settings
+            if (pluginSettings.stationId) {
+                // Check if it's a custom station not in the list
+                const optionExists = Array.from(stationSelect.options).some(opt => opt.value === pluginSettings.stationId);
+                if (!optionExists) {
+                    const customOption = document.createElement('option');
+                    customOption.value = pluginSettings.stationId;
+                    customOption.textContent = pluginSettings.stationId + ' - Custom';
+                    customOption.setAttribute('data-custom', 'true');
+                    stationSelect.appendChild(customOption);
+                }
+                stationSelect.value = pluginSettings.stationId;
+            }
+            
+            if (pluginSettings.customStationId) {
+                customStationInput.value = pluginSettings.customStationId;
+            }
+            
+            if (pluginSettings.units) {
+                document.getElementById('units').value = pluginSettings.units;
+            }
+            
+            const titleSelection = pluginSettings.titleSelection || 'auto';
+            document.querySelector(`input[name="titleSelection"][value="${titleSelection}"]`).checked = true;
+            
+            if (pluginSettings.customTitle) {
+                document.getElementById('customTitle').value = pluginSettings.customTitle;
+            }
+
+            // Display options
+            document.getElementById('displayRefreshTime').checked = pluginSettings.displayRefreshTime === 'true' || pluginSettings.displayRefreshTime === true;
+            document.getElementById('displayRefreshTime').value = document.getElementById('displayRefreshTime').checked ? 'true' : 'false';
+
+            document.getElementById('displayMetrics').checked = pluginSettings.displayMetrics !== 'false' && pluginSettings.displayMetrics !== false;
+            document.getElementById('displayMetrics').value = document.getElementById('displayMetrics').checked ? 'true' : 'false';
+
+            document.getElementById('displayChart').checked = pluginSettings.displayChart !== 'false' && pluginSettings.displayChart !== false;
+            document.getElementById('displayChart').value = document.getElementById('displayChart').checked ? 'true' : 'false';
+
+            document.getElementById('displayMoonPhase').checked = pluginSettings.displayMoonPhase !== 'false' && pluginSettings.displayMoonPhase !== false;
+            document.getElementById('displayMoonPhase').value = document.getElementById('displayMoonPhase').checked ? 'true' : 'false';
+            
+        } else {
+            // Set defaults for new installation
+            document.getElementById('stationId').value = '51205';
+            document.getElementById('units').value = 'imperial';
+            document.querySelector('input[name="titleSelection"][value="auto"]').checked = true;
+            
+            document.getElementById('displayRefreshTime').checked = true;
+            document.getElementById('displayRefreshTime').value = 'true';
+            
+            document.getElementById('displayMetrics').checked = true;
+            document.getElementById('displayMetrics').value = 'true';
+            
+            document.getElementById('displayChart').checked = true;
+            document.getElementById('displayChart').value = 'true';
+            
+            document.getElementById('displayMoonPhase').checked = true;
+            document.getElementById('displayMoonPhase').value = 'true';
+        }
+    });
+</script>
+
+<style>
+    .form-hint {
+        font-size: 0.85em;
+        color: #666;
+        margin-top: 4px;
+    }
+    .form-hint a {
+        color: #1a5f9e;
+        text-decoration: none;
+    }
+    .form-hint a:hover {
+        text-decoration: underline;
+    }
+</style>

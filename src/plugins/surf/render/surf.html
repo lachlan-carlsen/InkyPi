@@ -1,0 +1,206 @@
+{% extends "plugin.html" %}
+
+{% block content %}
+<div id="units-container" data-units="{{ units }}"></div>
+
+<div class="surf-dashboard">
+  {% if plugin_settings.displayRefreshTime == "true" %}
+  <div class="last-refresh">{{ last_refresh_time }}</div>
+  {% endif %}
+  
+  <!-- Header -->
+  <div class="header">
+    <div class="title">{{ title }}</div>
+    <div class="current-date">{{ current_date }}</div>
+  </div>
+
+  <div class="main-container">
+    <!-- Current Conditions - Left Side -->
+    <div class="current-conditions">
+      <!-- Wave Icon -->
+      <div class="wave-icon-container">
+        <svg class="wave-svg" viewBox="0 0 80 32" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0,16 Q10,4 20,16 T40,16 T60,16 T80,16" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <path d="M0,26 Q10,18 20,26 T40,26 T60,26 T80,26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      
+      <!-- Wave Height -->
+      <div class="wave-height">{{ wave_height }}<span class="height-unit">{{ height_unit }}</span></div>
+      
+      <!-- Size Rating -->
+      <div class="size-rating">{{ size_rating }}</div>
+      
+      <!-- Quality Badge -->
+      <div class="quality-badge quality-{{ quality|lower }}">{{ quality }}</div>
+      
+      <!-- Moon Phase - Below Quality Badge -->
+      {% if plugin_settings.displayMoonPhase != "false" %}
+      <div class="moon-display">
+        <div class="moon-icon-wrapper">
+          <img class="moon-icon" src="{{ moon_phase.icon }}" alt="Moon">
+        </div>
+        <div class="moon-text">
+          <span class="moon-label">MOON</span>
+          <span class="moon-value">{{ moon_phase.illumination }}%</span>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Data Points Grid - Right Side -->
+    {% if plugin_settings.displayMetrics != "false" %}
+    <div class="data-points">
+      {% for dp in data_points %}
+        {% if dp.label == "Direction" %}
+        <!-- Direction with inline SVG compass -->
+        <div class="data-point">
+          <div class="data-point-icon-container">
+            <svg class="compass-svg" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="none" stroke="black" stroke-width="2"/>
+              <g transform="rotate({{ direction_degrees }}, 24, 24)">
+                <polygon points="24,6 20,20 24,17 28,20" fill="black"/>
+                <polygon points="24,42 20,28 24,31 28,28" fill="#666"/>
+              </g>
+              <circle cx="24" cy="24" r="3" fill="white" stroke="black" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="data-point-info">
+            <div class="data-point-label">{{ dp.label }}</div>
+            <div class="data-point-value">{{ dp.measurement }}<span class="data-point-unit">{{ dp.unit }}</span></div>
+          </div>
+        </div>
+        {% else %}
+        <div class="data-point">
+          <div class="data-point-icon-container">
+            <img class="data-point-icon" src="{{ dp.icon }}" alt="{{ dp.label }}">
+          </div>
+          <div class="data-point-info">
+            <div class="data-point-label">{{ dp.label }}</div>
+            <div class="data-point-value">
+              {{ dp.measurement }}
+              {% if dp.unit %}<span class="data-point-unit">{{ dp.unit }}</span>{% endif %}
+              {% if dp.arrow %}<span class="direction-arrow">{{ dp.arrow }}</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Wave Height Chart -->
+  {% if plugin_settings.displayChart != "false" and historical_data %}
+  <div class="chart-section">
+    <div class="chart-title">24 HOUR TREND 
+      <span class="trend-indicator">
+        {% if trend == "rising" %}▲{% elif trend == "falling" %}▼{% else %}▶{% endif %}
+      </span>
+    </div>
+    <div class="chart-container">
+      <canvas id="waveHeightChart"></canvas>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="station-info">NDBC Buoy {{ station_id }}</span>
+    <span class="reading-time">{{ reading_time }}</span>
+  </div>
+</div>
+
+<script src="{{static_dir}}/scripts/chart.js" charset="UTF-8"></script>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const canvas = document.getElementById('waveHeightChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    const labels = [{% for h in historical_data %}"{{ h.time }}"{% if not loop.last %}, {% endif %}{% endfor %}];
+    const waveHeights = [{% for h in historical_data %}{{ h.wave_height or 0 }}{% if not loop.last %}, {% endif %}{% endfor %}];
+    const periods = [{% for h in historical_data %}{{ h.period or 0 }}{% if not loop.last %}, {% endif %}{% endfor %}];
+    
+    const minHeight = Math.max(0, Math.min(...waveHeights) - 0.5);
+    const maxHeight = Math.max(...waveHeights) + 0.5;
+    
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Wave Height',
+          data: waveHeights,
+          borderColor: '#000000',
+          backgroundColor: 'rgba(0, 0, 0, 0.1)',
+          borderWidth: 3,
+          pointRadius: 4,
+          pointBackgroundColor: '#000',
+          fill: true,
+          tension: 0.3
+        },
+        {
+          label: 'Period',
+          data: periods,
+          borderColor: '#888888',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'y1'
+        }]
+      },
+      options: {
+        animation: { duration: 0 },
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            ticks: {
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 8,
+              color: '#000',
+              font: { family: 'Jost', size: 11, weight: '600' }
+            },
+            grid: { display: false },
+            border: { display: false }
+          },
+          y: {
+            position: 'left',
+            min: minHeight,
+            max: maxHeight,
+            ticks: {
+              color: '#000',
+              font: { family: 'Jost', size: 11, weight: '600' },
+              callback: function(value) { return value.toFixed(1) + ' ft'; }
+            },
+            grid: { color: '#ddd', lineWidth: 1 },
+            border: { display: false }
+          },
+          y1: {
+            position: 'right',
+            min: 0,
+            max: 20,
+            ticks: {
+              color: '#888',
+              font: { family: 'Jost', size: 10 },
+              callback: function(value) { return value + 's'; }
+            },
+            grid: { display: false },
+            border: { display: false }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: false }
+        }
+      }
+    });
+  });
+</script>
+{% endblock %}
