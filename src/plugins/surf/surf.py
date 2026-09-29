@@ -90,7 +90,7 @@ def get_swell_quality(wave_height_ft, period_sec):
     """
     if wave_height_ft is None or period_sec is None:
         return "Unknown", "?"
-    
+
     # Period quality factor (longer = better organized swell)
     if period_sec >= 14:
         period_quality = "excellent"
@@ -100,7 +100,7 @@ def get_swell_quality(wave_height_ft, period_sec):
         period_quality = "fair"
     else:
         period_quality = "poor"  # Short period = choppy wind swell
-    
+
     # Size rating
     if wave_height_ft < 1:
         size_rating = "Flat"
@@ -120,7 +120,7 @@ def get_swell_quality(wave_height_ft, period_sec):
         size_rating = "DOH"
     else:
         size_rating = "XXL"
-    
+
     # Overall quality score
     if period_quality == "excellent" and wave_height_ft >= 3:
         quality = "Epic"
@@ -137,7 +137,7 @@ def get_swell_quality(wave_height_ft, period_sec):
     else:
         quality = "Flat"
         score = "●○○○○"
-    
+
     return quality, size_rating
 
 
@@ -147,45 +147,97 @@ class Surf(BasePlugin):
         template_params['style_settings'] = True
         return template_params
 
+    def degrees_to_cardinal(self, d):
+        '''
+        Converts degrees to cardinal directions (N, NNE, NE, etc.)
+        '''
+        dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+        ix = int((d + 11.25) / 22.5)
+        return dirs[ix % 16]
+
+
+    def process_wind_data(self, raw_data, tz, units):
+        if not raw_data: return None
+        lines = raw_data.strip().split('\n')
+        # Filter out comments and headers
+        data_lines = [l for l in lines if l.strip() and not l.startswith(('#', 'YY'))]
+
+        if not data_lines:
+            logger.warning("No valid data lines found in wind station data.")
+            return None
+
+        parts = data_lines[0].split() # Get latest line
+
+        # KLIH1 format usually: YY MM DD hh mm WDIR WSPD GST ...
+        try:
+            wdir = float(parts[5]) if parts[5] != 'MM' else 0
+            wspd = float(parts[6]) if parts[6] != 'MM' else 0
+            gst = float(parts[7]) if parts[7] != 'MM' else 0
+
+            if units == 'imperial':
+                wspd = wspd * 2.237  # m/s to mph
+                gst = gst * 2.237
+                unit_label = "mph"
+            else:
+                unit_label = "m/s"
+
+            return {
+                'speed': f"{wspd:.1f}",
+                'gust': f"{gst:.1f}",
+                'direction': self.degrees_to_cardinal(wdir),
+                'unit': unit_label
+            }
+        except (IndexError, ValueError) as e:
+            logger.error(f"Error parsing wind parts: {e}")
+            return None
+
+
     def generate_image(self, settings, device_config):
         station_id = settings.get('stationId', '51205')
         units = settings.get('units', 'imperial')
         custom_title = settings.get('customTitle', '')
-        
+
         timezone_str = device_config.get_config("timezone", default="Pacific/Honolulu")
         time_format = device_config.get_config("time_format", default="12h")
         tz = pytz.timezone(timezone_str)
-        
+
         try:
             # Fetch and parse NDBC data
+            # Fetch and parse NDBC data
             ndbc_data = self.fetch_ndbc_data(station_id)
+
+            # --- NEW LOGGING HERE ---
+            logger.info(f"Attempting to fetch wind data for station: KLIH1")
+            wind_raw_data = self.fetch_ndbc_data("KLIH1")
+            logger.info(f"Successfully fetched KLIH1 data. Length: {len(wind_raw_data)} characters.")
+            # ------------------------
+
+            # ... rest of your code ...
             template_params = self.parse_ndbc_data(ndbc_data, tz, units, time_format, station_id)
-            
-            # Set title
-            if custom_title:
-                template_params['title'] = custom_title
+
+            # ...
+
+            # --- NEW LOGGING HERE ---
+            logger.info("Processing wind data...")
+            template_params['wind_info'] = self.process_wind_data(wind_raw_data, tz, units)
+            if template_params['wind_info']:
+                logger.info(f"Wind data processed successfully: {template_params['wind_info']}")
             else:
-                station_info = BUOY_STATIONS.get(station_id, {})
-                template_params['title'] = station_info.get('name', f'Buoy {station_id}')
-            
-            # Get latitude for moon phase calculation
-            station_info = BUOY_STATIONS.get(station_id, {'lat': 20.0})
-            lat = station_info.get('lat', 20.0)
-            
-            # Add moon phase data
-            template_params['moon_phase'] = self.get_moon_phase_data(lat)
-            
+                logger.warning("Wind data processing returned None. wind_info will be falsey.")
+            # ------------------------
+
         except Exception as e:
             logger.error(f"NDBC request failed: {str(e)}")
             raise RuntimeError(f"Failed to fetch surf data: {str(e)}")
-        
+
         dimensions = device_config.get_resolution()
         if device_config.get_config("orientation") == "vertical":
             dimensions = dimensions[::-1]
-        
+
         template_params["plugin_settings"] = settings
         template_params["units"] = units
-        
+
         # Add last refresh time
         now = datetime.now(tz)
         if time_format == "24h":
@@ -193,9 +245,9 @@ class Surf(BasePlugin):
         else:
             last_refresh_time = now.strftime("%Y-%m-%d %I:%M %p")
         template_params["last_refresh_time"] = last_refresh_time
-        
+
         image = self.render_image(dimensions, "surf.html", "surf.css", template_params)
-        
+
         if not image:
             raise RuntimeError("Failed to render surf dashboard, please check logs.")
         return image
@@ -204,23 +256,23 @@ class Surf(BasePlugin):
         """Fetch real-time data from NDBC buoy"""
         url = NDBC_URL.format(station_id=station_id)
         response = requests.get(url, timeout=30)
-        
+
         if not 200 <= response.status_code < 300:
             logger.error(f"Failed to fetch NDBC data: {response.status_code}")
             raise RuntimeError(f"Failed to fetch NDBC data for station {station_id}")
-        
+
         return response.text
 
     def parse_ndbc_data(self, raw_data, tz, units, time_format, station_id):
         """Parse NDBC text data into structured format"""
         lines = raw_data.strip().split('\n')
-        
+
         # Skip header lines (start with #)
         data_lines = [line for line in lines if not line.startswith('#')]
-        
+
         if not data_lines:
             raise RuntimeError("No data available from NDBC")
-        
+
         # Parse readings (most recent first)
         readings = []
         for line in data_lines[:48]:  # Last 24 hours (30-min intervals)
@@ -229,41 +281,41 @@ class Surf(BasePlugin):
                 reading = self.parse_reading(parts, tz, units)
                 if reading:
                     readings.append(reading)
-        
+
         if not readings:
             raise RuntimeError("Failed to parse any valid readings from NDBC data")
-        
+
         # Current conditions (most recent reading)
         current = readings[0]
-        
+
         # Calculate wave height in appropriate units
         wave_height = current.get('wave_height')
         wave_height_display = wave_height if wave_height else 0
-        
+
         # Get period and direction
         period = current.get('dominant_period')
         avg_period = current.get('average_period')
         direction = current.get('wave_direction')
         direction_cardinal = degrees_to_cardinal(direction)
-        
+
         # Water temp
         water_temp = current.get('water_temp')
         water_temp_display = f"{water_temp:.1f}" if water_temp else "N/A"
-        
+
         # Air temp (may not be available on all buoys)
         air_temp = current.get('air_temp')
         air_temp_display = f"{air_temp:.1f}" if air_temp else "N/A"
-        
+
         # Get quality assessment
         quality, size_rating = get_swell_quality(wave_height, period)
-        
+
         # Temperature unit
         temp_unit = "°F" if units == "imperial" else "°C"
         height_unit = "ft" if units == "imperial" else "m"
-        
+
         # Build data points for the metrics grid
         data_points = []
-        
+
         # Dominant Period
         data_points.append({
             "label": "Period",
@@ -271,7 +323,7 @@ class Surf(BasePlugin):
             "unit": "sec",
             "icon": self.get_plugin_dir('icons/period.png')
         })
-        
+
         # Average Period
         data_points.append({
             "label": "Avg Period",
@@ -279,7 +331,7 @@ class Surf(BasePlugin):
             "unit": "sec",
             "icon": self.get_plugin_dir('icons/avg_period.png')
         })
-        
+
         # Swell Direction
         data_points.append({
             "label": "Direction",
@@ -288,7 +340,7 @@ class Surf(BasePlugin):
             "icon": self.get_plugin_dir('icons/direction.png'),
             "arrow": self.get_direction_arrow(direction) if direction else ""
         })
-        
+
         # Water Temperature
         data_points.append({
             "label": "Water",
@@ -296,7 +348,7 @@ class Surf(BasePlugin):
             "unit": temp_unit,
             "icon": self.get_plugin_dir('icons/water_temp.png')
         })
-        
+
         # Air Temperature (if available)
         if air_temp:
             data_points.append({
@@ -305,7 +357,7 @@ class Surf(BasePlugin):
                 "unit": temp_unit,
                 "icon": self.get_plugin_dir('icons/air_temp.png')
             })
-        
+
         # Wind (if available)
         wind_speed = current.get('wind_speed')
         wind_dir = current.get('wind_direction')
@@ -318,13 +370,13 @@ class Surf(BasePlugin):
                 "icon": self.get_plugin_dir('icons/wind.png'),
                 "arrow": self.get_direction_arrow(wind_dir) if wind_dir else ""
             })
-        
+
         # Parse historical data for chart
         historical = self.parse_historical_for_chart(readings, time_format)
-        
+
         # Get trend (comparing to 6 hours ago)
         trend = self.calculate_trend(readings)
-        
+
         return {
             "current_date": datetime.now(tz).strftime("%A, %B %d"),
             "wave_height": f"{wave_height_display:.1f}" if wave_height_display else "0.0",
@@ -349,67 +401,67 @@ class Surf(BasePlugin):
             day = int(parts[NDBC_COLUMNS['DD']])
             hour = int(parts[NDBC_COLUMNS['hh']])
             minute = int(parts[NDBC_COLUMNS['mm']])
-            
+
             dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
             dt_local = dt.astimezone(tz)
-            
+
             reading = {
                 'datetime': dt_local,
                 'time_str': dt_local.strftime("%I:%M %p")
             }
-            
+
             # Parse wave height (convert MM to None)
             wvht = parts[NDBC_COLUMNS['WVHT']]
             if wvht != 'MM':
                 wave_m = float(wvht)
                 reading['wave_height'] = meters_to_feet(wave_m) if units == 'imperial' else wave_m
                 reading['wave_height_m'] = wave_m
-            
+
             # Parse dominant period
             dpd = parts[NDBC_COLUMNS['DPD']]
             if dpd != 'MM':
                 reading['dominant_period'] = float(dpd)
-            
+
             # Parse average period
             apd = parts[NDBC_COLUMNS['APD']]
             if apd != 'MM':
                 reading['average_period'] = float(apd)
-            
+
             # Parse wave direction
             mwd = parts[NDBC_COLUMNS['MWD']]
             if mwd != 'MM':
                 reading['wave_direction'] = float(mwd)
-            
+
             # Parse water temperature
             wtmp = parts[NDBC_COLUMNS['WTMP']]
             if wtmp != 'MM':
                 temp_c = float(wtmp)
                 reading['water_temp'] = celsius_to_fahrenheit(temp_c) if units == 'imperial' else temp_c
-            
+
             # Parse air temperature
             atmp = parts[NDBC_COLUMNS['ATMP']]
             if atmp != 'MM':
                 temp_c = float(atmp)
                 reading['air_temp'] = celsius_to_fahrenheit(temp_c) if units == 'imperial' else temp_c
-            
+
             # Parse wind speed
             wspd = parts[NDBC_COLUMNS['WSPD']]
             if wspd != 'MM':
                 wind_mps = float(wspd)
                 reading['wind_speed'] = mps_to_mph(wind_mps) if units == 'imperial' else wind_mps
-            
+
             # Parse wind direction
             wdir = parts[NDBC_COLUMNS['WDIR']]
             if wdir != 'MM':
                 reading['wind_direction'] = float(wdir)
-            
+
             # Parse pressure
             pres = parts[NDBC_COLUMNS['PRES']]
             if pres != 'MM':
                 reading['pressure'] = float(pres)
-            
+
             return reading
-            
+
         except (ValueError, IndexError) as e:
             logger.warning(f"Failed to parse NDBC reading: {e}")
             return None
@@ -417,7 +469,7 @@ class Surf(BasePlugin):
     def parse_historical_for_chart(self, readings, time_format):
         """Extract historical wave heights for the chart"""
         historical = []
-        
+
         # Get readings at regular intervals (every 2 hours for cleaner chart)
         # Readings are 30 min apart, so take every 4th
         for i, reading in enumerate(reversed(readings)):
@@ -428,28 +480,28 @@ class Surf(BasePlugin):
                         time_label = dt.strftime("%H:%M")
                     else:
                         time_label = dt.strftime("%I%p").lstrip("0").lower()
-                    
+
                     historical.append({
                         'time': time_label,
                         'wave_height': reading.get('wave_height', 0),
                         'period': reading.get('dominant_period', 0)
                     })
-        
+
         return historical[-12:]  # Last 24 hours worth of 2-hour intervals
 
     def calculate_trend(self, readings):
         """Calculate if conditions are improving, declining, or steady"""
         if len(readings) < 12:  # Need at least 6 hours of data
             return "steady"
-        
+
         current_height = readings[0].get('wave_height', 0)
         past_height = readings[11].get('wave_height', 0)  # ~6 hours ago
-        
+
         if current_height is None or past_height is None:
             return "steady"
-        
+
         diff = current_height - past_height
-        
+
         if diff > 0.5:
             return "rising"
         elif diff < -0.5:
@@ -461,7 +513,7 @@ class Surf(BasePlugin):
         """Get arrow character for direction (shows where swell is coming FROM)"""
         if degrees is None:
             return ""
-        
+
         # Arrows point in the direction the swell is traveling TO
         # So we add 180 degrees to show where it's coming from
         DIRECTIONS = [
@@ -475,7 +527,7 @@ class Surf(BasePlugin):
             ("↘", 337.5),   # From NW
             ("↓", 360.0)    # Wrap to N
         ]
-        
+
         degrees = degrees % 360
         for arrow, upper_bound in DIRECTIONS:
             if degrees < upper_bound:
@@ -485,16 +537,16 @@ class Surf(BasePlugin):
     def get_moon_phase_data(self, lat):
         """Calculate current moon phase"""
         today = date.today()
-        
+
         try:
             phase_age = moon.phase(today)
             phase_name = get_moon_phase_name(phase_age)
-            
+
             # Calculate illumination
             LUNAR_CYCLE_DAYS = 29.530588853
             phase_fraction = phase_age / LUNAR_CYCLE_DAYS
             illum_pct = (1 - math.cos(2 * math.pi * phase_fraction)) / 2 * 100
-            
+
             # Adjust for hemisphere
             display_name = phase_name
             if lat < 0:
@@ -510,7 +562,7 @@ class Surf(BasePlugin):
                     display_name = "lastquarter"
                 elif phase_name == "lastquarter":
                     display_name = "firstquarter"
-            
+
             # Human-readable name
             phase_labels = {
                 "newmoon": "New Moon",
@@ -522,13 +574,13 @@ class Surf(BasePlugin):
                 "lastquarter": "Last Quarter",
                 "waningcrescent": "Waning Crescent"
             }
-            
+
             return {
                 "name": phase_labels.get(phase_name, "Unknown"),
                 "icon": self.get_plugin_dir(f"icons/{display_name}.png"),
                 "illumination": f"{illum_pct:.0f}"
             }
-            
+
         except Exception as e:
             logger.error(f"Error calculating moon phase: {e}")
             return {
